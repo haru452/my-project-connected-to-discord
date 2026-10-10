@@ -40,9 +40,14 @@ export default {
     }
 
     if (url.pathname === "/test") {
-      const today = todayInTimezone(env);
-      await sendReminder(env, await readState(env), today);
-      return new Response("sent");
+      try {
+        const today = todayInTimezone(env);
+        await sendReminder(env, await readState(env), today);
+        return new Response("sent");
+      } catch (e) {
+        // 原因が分かるメッセージを返す (動作確認用)
+        return new Response("Failed: " + (e && e.message ? e.message : String(e)), { status: 500 });
+      }
     }
 
     return new Response("Not found", { status: 404 });
@@ -89,7 +94,7 @@ async function sendReminder(env, state, today) {
     ? { content: `<@${userId}> ${text}`, allowed_mentions: { users: [String(userId)] } }
     : { content: text, allowed_mentions: { parse: [] } };
 
-  const response = await fetch(env.DISCORD_WEBHOOK_URL, {
+  const response = await fetch(getWebhookUrl(env), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -103,6 +108,32 @@ async function sendReminder(env, state, today) {
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
+const DISCORD_HOSTS = ["discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"];
+
+// Webhook URL が Discord のものか確認してから使う。
+// (workers.dev など別の URL を登録してしまうと、Cloudflare のエラー 1042 になるため)
+function getWebhookUrl(env) {
+  const raw = String(env.DISCORD_WEBHOOK_URL || "").trim();
+  if (!raw) {
+    throw new Error("DISCORD_WEBHOOK_URL is not set. Add it as a Secret in the Worker settings.");
+  }
+
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error("DISCORD_WEBHOOK_URL is not a valid URL.");
+  }
+
+  if (u.protocol !== "https:" || !DISCORD_HOSTS.includes(u.hostname) || !u.pathname.startsWith("/api/webhooks/")) {
+    throw new Error(
+      "DISCORD_WEBHOOK_URL must look like https://discord.com/api/webhooks/<id>/<token> " +
+        `(the registered URL points to host: ${u.hostname}).`
+    );
+  }
+  return u.toString();
+}
+
 async function readState(env) {
   const raw = await env.DIARY_KV.get("state");
   if (!raw) return { lastDate: null, streak: 0 };
