@@ -15,7 +15,7 @@ crons = ["20 9 * * *"]
 # 「今日書いたか」の記録を保存する場所。KV を作成して表示された id に置き換える (id は秘密の値ではないので、コミットしてよい)
 [[kv_namespaces]]
 binding = "DIARY_KV"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "74d8c35d2f804491b9cce28ef4845703"
 
 # 実行ログを記録する (毎日の定期実行が動いたかを、ダッシュボードの Observability で確認できる)
 [observability]
