@@ -1,4 +1,4 @@
-name = "diary-reminder"
+name = "my-project-connected-to-discord"
 main = "src/index.js"
 compatibility_date = "2025-06-01"
 
