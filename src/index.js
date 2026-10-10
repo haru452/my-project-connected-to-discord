@@ -2,6 +2,8 @@
 //
 //  POST /ping  : アプリが「今日の日記を書いた」と連絡する  { "date": "2026-10-10", "streak": 7 }
 //  POST /test  : 状態に関係なく、リマインドをすぐ Discord に送る (動作確認用)
+//  POST /status: 記録の状態を JSON で返す (アプリからの連絡が届いているかの確認用)
+//  POST /check : 定期実行と同じ判断を今すぐ行う。/check?dry=1 なら送信せず、判断の結果だけ返す
 //  cron        : 毎日決まった時刻に、今日の日記が書かれていなければ Discord に通知する
 //
 // どちらの POST も  Authorization: Bearer <APP_SECRET>  が必要。
@@ -10,15 +12,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ルートアクセス（トップページ）の処理を先頭に追加する場合
-    if (url.pathname === "/") {
-      return new Response("Diary Reminder Worker is running.");
-    }
-
     if (request.method !== "POST") {
       return new Response("Not found", { status: 404 });
     }
-    // ...以降のコード
     if (!(await isAuthorized(request, env))) {
       return new Response("Unauthorized", { status: 401 });
     }
@@ -30,7 +26,6 @@ export default {
       } catch {
         return new Response("Bad JSON", { status: 400 });
       }
-　　　// 例: index.js の fetch 関数内に追加
 
       const date = String(body.date ?? "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -44,6 +39,32 @@ export default {
         await env.DIARY_KV.put("state", JSON.stringify({ lastDate: date, streak }));
       }
       return new Response("ok");
+    }
+
+    if (url.pathname === "/check") {
+      // 定期実行と同じ処理。dry=1 のときは、Discord に送らず、判断の結果だけ返す
+      try {
+        const dryRun = url.searchParams.get("dry") === "1";
+        return new Response(await checkAndRemind(env, { dryRun }));
+      } catch (e) {
+        return new Response("Failed: " + (e && e.message ? e.message : String(e)), { status: 500 });
+      }
+    }
+
+    if (url.pathname === "/status") {
+      // 現在の記録を確認する (アプリからの連絡が届いているかの確認用)
+      const today = todayInTimezone(env);
+      const state = await readState(env);
+      const status = {
+        today,                                   // Worker が考えている「今日」(TIMEZONE 基準)
+        lastDate: state.lastDate,                // アプリから最後に連絡があった「日記を書いた日」
+        streak: state.streak,
+        doneToday: state.lastDate === today,     // true なら、今日はリマインドが送られない
+        remindedDate: await env.DIARY_KV.get("reminded"),   // 最後にリマインドを送った日
+      };
+      return new Response(JSON.stringify(status, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     if (url.pathname === "/test") {
@@ -61,25 +82,39 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(checkAndRemind(env));
+    ctx.waitUntil(
+      checkAndRemind(env).then((result) => {
+        console.log("[cron] " + result);   // Observability のログで、定期実行の結果を確認できる
+      })
+    );
   },
 };
 
 // ------------------------------------------------------------
 // Reminder
 // ------------------------------------------------------------
-async function checkAndRemind(env) {
+// 戻り値: 何をしたか (または、なぜ送らなかったか) の説明
+async function checkAndRemind(env, { dryRun = false } = {}) {
   const today = todayInTimezone(env);
   const state = await readState(env);
 
   // 今日はもう書いている
-  if (state.lastDate === today) return;
+  if (state.lastDate === today) {
+    return `skipped: today's diary is already recorded (today=${today}, lastDate=${state.lastDate})`;
+  }
 
   // 同じ日に二重送信しない (cron の再実行対策)
-  if ((await env.DIARY_KV.get("reminded")) === today) return;
+  if ((await env.DIARY_KV.get("reminded")) === today) {
+    return `skipped: a reminder was already sent today (today=${today})`;
+  }
+
+  if (dryRun) {
+    return `would send a reminder now (today=${today}, lastDate=${state.lastDate})`;
+  }
 
   await sendReminder(env, state, today);
   await env.DIARY_KV.put("reminded", today);
+  return `sent a reminder (today=${today}, lastDate=${state.lastDate})`;
 }
 
 async function sendReminder(env, state, today) {
