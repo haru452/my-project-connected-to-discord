@@ -1,0 +1,17 @@
+name = "diary-reminder"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# 毎日 UTC 11:00 = 日本時間 20:00 に実行する (cron は UTC で書く)
+# 時刻を変えるときは「日本時間 - 9時間」を UTC に直す。例: 21:00 JST → "0 12 * * *"
+[triggers]
+crons = ["0 11 * * *"]
+
+# 「今日書いたか」の記録を保存する場所。KV を作成して表示された id に置き換える (id は秘密の値ではないので、コミットしてよい)
+[[kv_namespaces]]
+binding = "DIARY_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+[vars]
+# 「今日」の日付を判定するタイムゾーン
+TIMEZONE = "Asia/Tokyo"

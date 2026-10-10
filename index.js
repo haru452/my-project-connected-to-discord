@@ -1,0 +1,155 @@
+// Diary reminder Worker
+//
+//  POST /ping  : アプリが「今日の日記を書いた」と連絡する  { "date": "2026-10-10", "streak": 7 }
+//  POST /test  : 状態に関係なく、リマインドをすぐ Discord に送る (動作確認用)
+//  cron        : 毎日決まった時刻に、今日の日記が書かれていなければ Discord に通知する
+//
+// どちらの POST も  Authorization: Bearer <APP_SECRET>  が必要。
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (request.method !== "POST") {
+      return new Response("Not found", { status: 404 });
+    }
+    if (!(await isAuthorized(request, env))) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    if (url.pathname === "/ping") {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return new Response("Bad JSON", { status: 400 });
+      }
+
+      const date = String(body.date ?? "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return new Response("Bad date", { status: 400 });
+      }
+      const streak = Number.isInteger(body.streak) && body.streak >= 0 ? body.streak : 0;
+
+      // 日付が古い連絡(遅れて届いたもの)で、新しい記録を上書きしない
+      const state = await readState(env);
+      if (!state.lastDate || date >= state.lastDate) {
+        await env.DIARY_KV.put("state", JSON.stringify({ lastDate: date, streak }));
+      }
+      return new Response("ok");
+    }
+
+    if (url.pathname === "/test") {
+      const today = todayInTimezone(env);
+      await sendReminder(env, await readState(env), today);
+      return new Response("sent");
+    }
+
+    return new Response("Not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(checkAndRemind(env));
+  },
+};
+
+// ------------------------------------------------------------
+// Reminder
+// ------------------------------------------------------------
+async function checkAndRemind(env) {
+  const today = todayInTimezone(env);
+  const state = await readState(env);
+
+  // 今日はもう書いている
+  if (state.lastDate === today) return;
+
+  // 同じ日に二重送信しない (cron の再実行対策)
+  if ((await env.DIARY_KV.get("reminded")) === today) return;
+
+  await sendReminder(env, state, today);
+  await env.DIARY_KV.put("reminded", today);
+}
+
+async function sendReminder(env, state, today) {
+  const yesterday = addDays(today, -1);
+
+  let text;
+  if (state.lastDate === yesterday && state.streak > 0) {
+    // 昨日まで続いている → 今日書かないと途切れる
+    text =
+      "\u{1F4D3} Reminder: you haven't written today's diary yet.\n" +
+      `Your **${state.streak}-day streak** ends tonight if you skip. Take a minute to speak your diary!`;
+  } else {
+    text = "\u{1F4D3} Reminder: you haven't written today's diary yet. Take a minute to speak your diary!";
+  }
+
+  // DISCORD_USER_ID があれば、その人にだけメンションして通知が鳴るようにする
+  const userId = env.DISCORD_USER_ID;
+  const payload = userId
+    ? { content: `<@${userId}> ${text}`, allowed_mentions: { users: [String(userId)] } }
+    : { content: text, allowed_mentions: { parse: [] } };
+
+  const response = await fetch(env.DISCORD_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord webhook failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+// ------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------
+async function readState(env) {
+  const raw = await env.DIARY_KV.get("state");
+  if (!raw) return { lastDate: null, streak: 0 };
+  try {
+    const s = JSON.parse(raw);
+    return { lastDate: s.lastDate ?? null, streak: s.streak ?? 0 };
+  } catch {
+    return { lastDate: null, streak: 0 };
+  }
+}
+
+// 指定タイムゾーン (既定: Asia/Tokyo) での今日の日付 "YYYY-MM-DD"
+function todayInTimezone(env) {
+  const timeZone = env.TIMEZONE || "Asia/Tokyo";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function addDays(dateString, delta) {
+  const d = new Date(`${dateString}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+async function isAuthorized(request, env) {
+  const expected = env.APP_SECRET;
+  if (!expected) return false;
+
+  const header = request.headers.get("Authorization") || "";
+  const given = header.startsWith("Bearer ") ? header.slice(7) : "";
+  return timingSafeEqual(given, expected);
+}
+
+// 文字列の比較にかかる時間から秘密を推測されないよう、長さが違っても同じ処理を通す
+async function timingSafeEqual(a, b) {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const va = new Uint8Array(ha);
+  const vb = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
+  return diff === 0;
+}
