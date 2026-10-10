@@ -10,9 +10,15 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // ルートアクセス（トップページ）の処理を先頭に追加する場合
+    if (url.pathname === "/") {
+      return new Response("Diary Reminder Worker is running.");
+    }
+
     if (request.method !== "POST") {
       return new Response("Not found", { status: 404 });
     }
+    // ...以降のコード
     if (!(await isAuthorized(request, env))) {
       return new Response("Unauthorized", { status: 401 });
     }
@@ -25,9 +31,7 @@ export default {
         return new Response("Bad JSON", { status: 400 });
       }
 　　　// 例: index.js の fetch 関数内に追加
-　　if (url.pathname === "/") {
-  　　return new Response("Diary Reminder Worker is running.");
-　}
+
       const date = String(body.date ?? "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return new Response("Bad date", { status: 400 });
