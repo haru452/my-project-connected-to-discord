@@ -24,7 +24,10 @@ export default {
       } catch {
         return new Response("Bad JSON", { status: 400 });
       }
-
+　　　// 例: index.js の fetch 関数内に追加
+　　if (url.pathname === "/") {
+  　　return new Response("Diary Reminder Worker is running.");
+　}
       const date = String(body.date ?? "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return new Response("Bad date", { status: 400 });
