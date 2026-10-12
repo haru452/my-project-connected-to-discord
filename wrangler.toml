@@ -10,12 +10,12 @@ preview_urls = false
 # 毎日 UTC 11:00 = 日本時間 20:00 に実行する (cron は UTC で書く)
 # 時刻を変えるときは「日本時間 - 9時間」を UTC に直す。例: 21:00 JST → "0 12 * * *"
 [triggers]
-crons = ["23 9 * * *"]
+crons = ["0 11 * * *"]
 
 # 「今日書いたか」の記録を保存する場所。KV を作成して表示された id に置き換える (id は秘密の値ではないので、コミットしてよい)
 [[kv_namespaces]]
 binding = "DIARY_KV"
-id = "74d8c35d2f804491b9cce28ef4845703"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
 
 # 実行ログを記録する (毎日の定期実行が動いたかを、ダッシュボードの Observability で確認できる)
 [observability]
@@ -24,3 +24,32 @@ enabled = true
 [vars]
 # 「今日」の日付を判定するタイムゾーン
 TIMEZONE = "Asia/Tokyo"
+# 1日の切り替わり時刻 (0〜23)。3 なら、夜中の 3:00 までは前の日として扱う
+DAY_START_HOUR = "3"name = "diary-reminder"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# アプリが使う https://<name>.<あなたの名前>.workers.dev のURLを有効にする
+workers_dev = true
+# ブランチごとの確認用URLは使わない (不要な入口を増やさない)
+preview_urls = false
+
+# 毎日 UTC 11:00 = 日本時間 20:00 に実行する (cron は UTC で書く)
+# 時刻を変えるときは「日本時間 - 9時間」を UTC に直す。例: 21:00 JST → "0 12 * * *"
+[triggers]
+crons = ["0 11 * * *"]
+
+# 「今日書いたか」の記録を保存する場所。KV を作成して表示された id に置き換える (id は秘密の値ではないので、コミットしてよい)
+[[kv_namespaces]]
+binding = "DIARY_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# 実行ログを記録する (毎日の定期実行が動いたかを、ダッシュボードの Observability で確認できる)
+[observability]
+enabled = true
+
+[vars]
+# 「今日」の日付を判定するタイムゾーン
+TIMEZONE = "Asia/Tokyo"
+# 1日の切り替わり時刻 (0〜23)。3 なら、夜中の 3:00 までは前の日として扱う
+DAY_START_HOUR = "3"
