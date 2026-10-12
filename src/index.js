@@ -190,12 +190,15 @@ async function readState(env) {
 // 指定タイムゾーン (既定: Asia/Tokyo) での今日の日付 "YYYY-MM-DD"
 function todayInTimezone(env) {
   const timeZone = env.TIMEZONE || "Asia/Tokyo";
+  // 1日の切り替わり時刻 (例: 3 → 夜中の 3:00 までは前の日として扱う)。アプリ・Supabase と同じ値にする
+  const startHour = Number(env.DAY_START_HOUR ?? 3);
+  const shifted = new Date(Date.now() - startHour * 3600 * 1000);
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).format(shifted);
 }
 
 function addDays(dateString, delta) {
